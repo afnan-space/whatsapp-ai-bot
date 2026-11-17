@@ -13,7 +13,17 @@ if (token) {
   bot = new Telegraf(token, {
     handlerTimeout: 90000,
   });
+
+  // Catch all uncaught errors inside telegraf middleware
+  bot.catch((err, ctx) => {
+    console.error(`⚠️ Telegram bot error for ${ctx.updateType}:`, err.message);
+  });
 }
+
+// Global unhandled rejection safety
+process.on("unhandledRejection", (reason, promise) => {
+  console.warn("⚠️ Handled async warning:", reason?.message || reason);
+});
 
 // ---- Admin Guard ----
 function requireAdmin(ctx, next) {
@@ -225,16 +235,23 @@ export async function sendPhotoToAdmin(source, caption) {
   }
 }
 
-export function startTelegramBot() {
+export async function startTelegramBot() {
   if (!bot) {
     console.warn("⚠️ TELEGRAM_BOT_TOKEN not provided.");
     return;
   }
-  bot.launch().then(() => {
-    console.log("✅ Telegram bot started!");
-  }).catch((err) => {
-    console.error("⚠️ Telegram bot launch failed (retrying in background):", err.message);
-  });
+  
+  const launchWithRetry = async () => {
+    try {
+      await bot.launch();
+      console.log("✅ Telegram bot connected successfully!");
+    } catch (err) {
+      console.warn("⚠️ Telegram connect retry in 10s:", err.message);
+      setTimeout(launchWithRetry, 10000);
+    }
+  };
+
+  launchWithRetry();
 
   process.once("SIGINT",  () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
