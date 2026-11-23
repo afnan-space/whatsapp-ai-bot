@@ -24,11 +24,103 @@ app.get("/health", (req, res) =>
   res.json({
     status: "ok",
     shop: state.shopName,
+    mode: state.mode,
     botOn: state.isOn,
+    isWhatsAppConnected: state.isWhatsAppConnected,
+    usedMessages: state.subscription.usedMessages,
     uptime: Math.floor(process.uptime()) + "s",
     timestamp: new Date().toISOString(),
   })
 );
+
+// Mobile WebApp Sheet / Dashboard Endpoint
+app.get("/webapp", (req, res) => {
+  const allOrders = getAllOrders();
+  const prods = catalog.products || [];
+  const sub = state.subscription;
+  const remaining = Math.max(0, sub.totalMessages - sub.usedMessages);
+
+  const html = `
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${state.shopName} — Control Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-4 font-sans">
+  <div class="max-w-md mx-auto space-y-4">
+    <!-- Header -->
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4 shadow-lg">
+      <div class="flex justify-between items-center">
+        <div>
+          <h1 class="text-xl font-bold text-white">${state.shopName}</h1>
+          <p class="text-xs text-slate-400">মালিক: ${state.ownerName}</p>
+        </div>
+        <span class="px-2.5 py-1 text-xs font-semibold rounded-full ${state.isWhatsAppConnected ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
+          ${state.isWhatsAppConnected ? '🟢 Connected' : '🔴 Disconnected'}
+        </span>
+      </div>
+    </div>
+
+    <!-- Quota Card -->
+    <div class="bg-gradient-to-br from-indigo-900/60 to-purple-900/60 border border-indigo-700/40 rounded-2xl p-4">
+      <div class="flex justify-between items-center mb-2">
+        <span class="text-xs font-medium text-indigo-300">সাবস্ক্রিপশন: ${sub.plan}</span>
+        <span class="text-xs font-bold text-white">${sub.usedMessages} / ${sub.totalMessages}</span>
+      </div>
+      <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
+        <div class="bg-indigo-400 h-2.5 rounded-full" style="width: ${Math.min(100, Math.round((sub.usedMessages / sub.totalMessages) * 100))}%"></div>
+      </div>
+      <p class="text-[11px] text-slate-300 mt-2">বাকি আছে: ${remaining} টি AI রিপ্লাই</p>
+    </div>
+
+    <!-- Orders Section -->
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4">
+      <h2 class="text-sm font-bold text-slate-200 mb-3 flex items-center justify-between">
+        <span>🛒 সাম্প্রতিক অর্ডারসমূহ</span>
+        <span class="text-xs font-normal text-indigo-400">${allOrders.length} টি</span>
+      </h2>
+      <div class="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+        ${allOrders.length === 0 ? '<p class="text-xs text-slate-400 text-center py-4">এখনো কোনো অর্ডার আসেনি।</p>' : ''}
+        ${allOrders.slice(0, 5).map(o => `
+          <div class="bg-slate-900/80 border border-slate-700/60 p-2.5 rounded-xl text-xs space-y-1">
+            <div class="flex justify-between font-semibold">
+              <span class="text-indigo-300">#${o.id} - ${o.customerName}</span>
+              <span class="${o.status === 'Confirmed' ? 'text-emerald-400' : o.status === 'Pending' ? 'text-amber-400' : 'text-rose-400'}">${o.status}</span>
+            </div>
+            <p class="text-slate-400">📞 ${o.customerPhone} | ৳${o.totalAmount}</p>
+            <p class="text-slate-500 text-[11px]">📍 ${o.address}</p>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <!-- Products Catalog Section -->
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4">
+      <h2 class="text-sm font-bold text-slate-200 mb-3 flex items-center justify-between">
+        <span>📦 প্রোডাক্ট ক্যাটালগ</span>
+        <span class="text-xs font-normal text-indigo-400">${prods.length} টি</span>
+      </h2>
+      <div class="space-y-2 max-h-48 overflow-y-auto pr-1">
+        ${prods.map(p => `
+          <div class="flex justify-between items-center bg-slate-900/60 border border-slate-700/50 p-2 rounded-xl text-xs">
+            <div>
+              <p class="font-medium text-white">${p.name}</p>
+              <p class="text-[11px] text-slate-400">সাইজ: ${(p.sizes || []).join(', ')}</p>
+            </div>
+            <span class="font-bold text-emerald-400">৳${p.price}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+  res.send(html);
+});
 
 app.listen(PORT, () => console.log(`✅ Keep-alive server on port ${PORT}`));
 
