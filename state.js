@@ -60,6 +60,8 @@ export const state = {
   dailyReplyCounts: new Map(), // contactId -> { count, date }
   logs: [],
   sock: null,
+  isWhatsAppConnected: false,
+  latestQR: null,
 };
 
 export function saveConfig() {

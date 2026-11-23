@@ -2,6 +2,7 @@
 // telegram.js - Telegram Control Panel with Persona, Orders & Takeover
 // ============================================================
 import { Telegraf, Markup } from "telegraf";
+import QRCode from "qrcode";
 import { state, addLog, saveConfig, getFullSystemPrompt, catalog } from "./state.js";
 import { clearAllHistory } from "./gemini.js";
 import { getAllOrders, updateOrderStatus, formatOrderCard, getOrderById } from "./orders.js";
@@ -31,27 +32,97 @@ function requireAdmin(ctx, next) {
 
 if (bot) {
   // Main Dashboard / Help
-  bot.start(requireAdmin, (ctx) =>
-    ctx.reply(
+  bot.start(requireAdmin, (ctx) => {
+    const statusText = state.isWhatsAppConnected ? "🟢 WhatsApp Connected" : "🔴 WhatsApp Disconnected";
+    const buttons = Markup.inlineKeyboard([
+      [
+        Markup.button.callback("🔑 WhatsApp Login (QR)", "btn_request_qr"),
+        Markup.button.callback("📊 Status", "btn_check_status"),
+      ],
+      [
+        Markup.button.callback("🛒 View Orders", "btn_view_orders"),
+        Markup.button.callback("📦 View Catalog", "btn_view_catalog"),
+      ],
+    ]);
+
+    return ctx.reply(
       `💼 *WhatsApp AI Business Assistant — Command Desk*\n` +
-      `দোকান: *${state.shopName}* | মালিক: *${state.ownerName}*\n\n` +
-      `*🛒 অর্ডার ও কাস্টমার ম্যানেজমেন্ট:*\n` +
-      `/orders — সাম্প্রতিক অর্ডারগুলোর তালিকা দেখুন\n` +
-      `/customers — সাম্প্রতিক চ্যাট করা কাস্টমারদের তালিকা\n` +
-      `/takeover [phone] — নির্দিষ্ট কাস্টমারের জন্য AI বন্ধ করে নিজে চ্যাট করুন\n` +
-      `/resume [phone] — আবার AI চালু করুন\n\n` +
-      `*⚙️ দোকান ও সেটিংস:*\n` +
-      `/shop [দোকানের নাম] — দোকানের নাম পরিবর্তন\n` +
-      `/setowner [নাম] — মালিকের নাম পরিবর্তন\n` +
-      `/maxreplies [সংখ্যা] — দৈনিক সর্বোচ্চ রিপ্লাই লিমিট (বর্তমান: ${state.maxDailyRepliesPerUser})\n` +
-      `/catalog — বর্তমান প্রোডাক্ট তালিকা ও স্টক দেখুন\n` +
-      `/status — সম্পূর্ণ বট ও সিস্টেম স্ট্যাটাস\n` +
-      `/on / /off — পুরো বট চালু বা বন্ধ করুন\n\n` +
-      `*💬 সরাসরি WhatsApp মেসেজ:* \n` +
-      `/send [phone] [message]`,
+      `দোকান: *${state.shopName}* | মালিক: *${state.ownerName}*\n` +
+      `স্ট্যাটাস: *${statusText}*\n\n` +
+      `*দ্রুত অ্যাকশন নিতে নিচের বাটনে চাপ দিন:*`,
+      { parse_mode: "Markdown", ...buttons }
+    );
+  });
+
+  // Dedicated /login command and button callback
+  const handleLoginRequest = async (ctx) => {
+    if (state.isWhatsAppConnected) {
+      return ctx.reply("✅ আপনার WhatsApp ইতিমধ্যে কানেক্টেড রয়েছে! আর কোনো QR স্ক্যান করার প্রয়োজন নেই।");
+    }
+
+    if (!state.latestQR) {
+      return ctx.reply("⏳ নতুন QR কোড জেনারেট হচ্ছে... দয়া করে ৫-১০ সেকেন্ড পর আবার চেষ্টা করুন।");
+    }
+
+    try {
+      const qrBuffer = await QRCode.toBuffer(state.latestQR, { width: 400 });
+      await ctx.replyWithPhoto(
+        { source: qrBuffer },
+        {
+          caption:
+            "📱 *WhatsApp Login QR Code*\n\n" +
+            "১. আপনার ফোনের WhatsApp ওপেন করুন\n" +
+            "২. Settings → Linked Devices → Link a Device\n" +
+            "৩. এই QR কোডটি স্ক্যান করে নিন (৪০ সেকেন্ডের মধ্যে)",
+          parse_mode: "Markdown",
+        }
+      );
+    } catch (err) {
+      ctx.reply(`📱 QR Code Link: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(state.latestQR)}`);
+    }
+  };
+
+  bot.command("login", requireAdmin, handleLoginRequest);
+  bot.action("btn_request_qr", handleLoginRequest);
+
+  bot.action("btn_check_status", async (ctx) => {
+    await ctx.answerCbQuery();
+    const statusText = state.isWhatsAppConnected ? "🟢 WhatsApp Connected" : "🔴 WhatsApp Disconnected";
+    ctx.reply(
+      `📊 *Business Bot Status*\n\n` +
+      `🏢 দোকান: *${state.shopName}*\n` +
+      `📱 WhatsApp: *${statusText}*\n` +
+      `🤖 AI রিপ্লাই: ${state.isOn ? "✅ সচল" : "🔴 বন্ধ"}\n` +
+      `🛒 মোট অর্ডার: ${getAllOrders().length} টি\n` +
+      `💬 দৈনিক রিপ্লাই লিমিট: ${state.maxDailyRepliesPerUser} টি`,
       { parse_mode: "Markdown" }
-    )
-  );
+    );
+  });
+
+  bot.action("btn_view_orders", async (ctx) => {
+    await ctx.answerCbQuery();
+    const all = getAllOrders();
+    if (!all.length) return ctx.reply("📭 এখনো কোনো নতুন অর্ডার আসেনি।");
+    const recent = all.slice(0, 3);
+    for (const ord of recent) {
+      const card = formatOrderCard(ord);
+      const buttons = Markup.inlineKeyboard([
+        [
+          Markup.button.callback("✅ Confirm", `order_confirm_${ord.id}`),
+          Markup.button.callback("❌ Cancel", `order_cancel_${ord.id}`),
+        ],
+      ]);
+      ctx.reply(card, { parse_mode: "Markdown", ...buttons });
+    }
+  });
+
+  bot.action("btn_view_catalog", async (ctx) => {
+    await ctx.answerCbQuery();
+    const list = (catalog.products || [])
+      .map((p, idx) => `${idx + 1}. *${p.name}* (ID: \`${p.id}\`)\n   💵 দাম: ৳${p.price} | সাইজ: ${(p.sizes || []).join(", ")} | কালার: ${(p.colors || []).join(", ")}`)
+      .join("\n\n");
+    ctx.reply(`📦 *প্রোডাক্ট ক্যাটালগ:*\n\n${list || "কোনো প্রোডাক্ট পাওয়া যায়নি।"}`, { parse_mode: "Markdown" });
+  });
 
   bot.command("on", requireAdmin, (ctx) => {
     state.isOn = true;

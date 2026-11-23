@@ -97,32 +97,29 @@ async function connectWhatsApp() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log("📱 QR Code ready — sending to Telegram...");
-      try {
-        const qrBuffer = await QRCode.toBuffer(qr, { width: 400 });
-        await sendPhotoToAdmin(qrBuffer, "📱 WhatsApp QR Code! ১ মিনিটের মধ্যে স্ক্যান করুন");
-        await notifyAdmin("1️⃣ WhatsApp ওপেন করুন\n2️⃣ Settings → Linked Devices\n3️⃣ এই QR স্ক্যান করুন");
-      } catch (err) {
-        await notifyAdmin(`📱 *QR Code:* https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
-      }
+      console.log("📱 New WhatsApp QR Code generated in memory.");
+      state.latestQR = qr;
+      state.isWhatsAppConnected = false;
     }
 
     if (connection === "close") {
+      state.isWhatsAppConnected = false;
       const code = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = code !== DisconnectReason.loggedOut;
       console.log(`🔴 WhatsApp Connection closed. Code: ${code}. Reconnect: ${shouldReconnect}`);
 
       if (shouldReconnect) {
-        await notifyAdmin(`🔄 *WhatsApp reconnecting...* (Code: ${code})`);
         setTimeout(connectWhatsApp, 5000);
       } else {
-        await notifyAdmin("🔴 *WhatsApp Logout হয়ে গেছে! আবার QR স্ক্যান করতে হবে।*");
+        await notifyAdmin("🔴 *WhatsApp Logout হয়ে গেছে!* পুনরায় লগইন করতে Telegram-এ `/login` লিখুন বা Login বাটনে চাপুন।");
       }
     }
 
     if (connection === "open") {
+      state.isWhatsAppConnected = true;
+      state.latestQR = null;
       console.log("✅ WhatsApp business connected!");
-      await notifyAdmin("✅ *WhatsApp সফলভাবে কানেক্ট হয়েছে!*\nদোকানের AI সেলস অ্যাসিস্ট্যান্ট এখন একটিভ।");
+      await notifyAdmin("✅ *WhatsApp সফলভাবে কানেক্ট হয়েছে!*\nদোকানের AI সেলস অ্যাসিস্ট্যান্ট এখন সম্পূর্ণ প্রস্তুত।");
     }
   });
 
