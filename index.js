@@ -7,10 +7,10 @@ import pino from "pino";
 import QRCode from "qrcode";
 import express from "express";
 import cron from "node-cron";
-import { state, addLog, getFullSystemPrompt, canReplyToContact } from "./state.js";
+import { state, addLog, getFullSystemPrompt, canReplyToContact, catalog } from "./state.js";
 import { getGeminiReply, getGeminiImageReply } from "./gemini.js";
 import { startTelegramBot, notifyAdmin, sendPhotoToAdmin, sendOrderAlert } from "./telegram.js";
-import { createOrder } from "./orders.js";
+import { createOrder, getAllOrders } from "./orders.js";
 import { syncOrderToGoogleSheets } from "./sheets.js";
 
 // ============================================================
@@ -23,8 +23,8 @@ app.get("/", (req, res) => res.send("🤖 WhatsApp AI Business Agent is running!
 app.get("/health", (req, res) =>
   res.json({
     status: "ok",
-    shop: state.shopName,
     mode: state.mode,
+    shop: state.business?.shopName || "N/A",
     botOn: state.isOn,
     isWhatsAppConnected: state.isWhatsAppConnected,
     usedMessages: state.subscription.usedMessages,
@@ -35,31 +35,47 @@ app.get("/health", (req, res) =>
 
 // Mobile WebApp Sheet / Dashboard Endpoint
 app.get("/webapp", (req, res) => {
-  const allOrders = getAllOrders();
-  const prods = catalog.products || [];
-  const sub = state.subscription;
-  const remaining = Math.max(0, sub.totalMessages - sub.usedMessages);
+  try {
+    const allOrders = getAllOrders() || [];
+    const prods = catalog.products || [];
+    const sub = state.subscription || { plan: "Free Trial", usedMessages: 0, totalMessages: 500 };
+    const remaining = Math.max(0, sub.totalMessages - sub.usedMessages);
 
-  const html = `
+    const isPersonal = state.mode === "personal";
+    const isSupport = state.mode === "support";
+    const headerTitle = isPersonal
+      ? `${state.ownerName}-এর ব্যক্তিগত সহকারী`
+      : isSupport
+      ? `${state.support?.orgName || "সাপোর্ট হেল্পডেস্ক"}`
+      : `${state.business?.shopName || "দোকান ড্যাশবোর্ড"}`;
+
+    const modeBadge = isPersonal
+      ? "👤 Personal Assistant"
+      : isSupport
+      ? "🎧 Customer Support"
+      : "🛍️ Product Sales";
+
+    const html = `
 <!DOCTYPE html>
 <html lang="bn">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${state.shopName} — Control Dashboard</title>
+  <title>${headerTitle}</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen p-4 font-sans">
   <div class="max-w-md mx-auto space-y-4">
     <!-- Header -->
     <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4 shadow-lg">
-      <div class="flex justify-between items-center">
+      <div class="flex justify-between items-start">
         <div>
-          <h1 class="text-xl font-bold text-white">${state.shopName}</h1>
-          <p class="text-xs text-slate-400">মালিক: ${state.ownerName}</p>
+          <h1 class="text-xl font-bold text-white">${headerTitle}</h1>
+          <p class="text-xs text-indigo-400 font-medium mt-0.5">${modeBadge}</p>
+          <p class="text-[11px] text-slate-400 mt-1">মালিক: ${state.ownerName}</p>
         </div>
         <span class="px-2.5 py-1 text-xs font-semibold rounded-full ${state.isWhatsAppConnected ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
-          ${state.isWhatsAppConnected ? '🟢 Connected' : '🔴 Disconnected'}
+          ${state.isWhatsAppConnected ? '🟢 Live' : '🔴 Offline'}
         </span>
       </div>
     </div>
@@ -67,7 +83,7 @@ app.get("/webapp", (req, res) => {
     <!-- Quota Card -->
     <div class="bg-gradient-to-br from-indigo-900/60 to-purple-900/60 border border-indigo-700/40 rounded-2xl p-4">
       <div class="flex justify-between items-center mb-2">
-        <span class="text-xs font-medium text-indigo-300">সাবস্ক্রিপশন: ${sub.plan}</span>
+        <span class="text-xs font-medium text-indigo-300">প্ল্যান: ${sub.plan}</span>
         <span class="text-xs font-bold text-white">${sub.usedMessages} / ${sub.totalMessages}</span>
       </div>
       <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
@@ -76,7 +92,18 @@ app.get("/webapp", (req, res) => {
       <p class="text-[11px] text-slate-300 mt-2">বাকি আছে: ${remaining} টি AI রিপ্লাই</p>
     </div>
 
-    <!-- Orders Section -->
+    ${isPersonal ? `
+    <!-- Personal Mode Details -->
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4 space-y-3">
+      <h2 class="text-sm font-bold text-slate-200">ℹ️ ব্যক্তিগত তথ্য ও নির্দেশাবলী</h2>
+      <div class="text-xs space-y-2 bg-slate-900/60 p-3 rounded-xl border border-slate-700/50">
+        <p><strong class="text-indigo-300">আমার বায়ো:</strong> ${state.personal?.bio}</p>
+        <p><strong class="text-indigo-300">কথার টোন:</strong> ${state.personal?.tone}</p>
+        <p><strong class="text-indigo-300">বিশেষ নির্দেশ:</strong> ${state.personal?.instruction}</p>
+      </div>
+    </div>
+    ` : `
+    <!-- Orders Section (Business/Support) -->
     <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4">
       <h2 class="text-sm font-bold text-slate-200 mb-3 flex items-center justify-between">
         <span>🛒 সাম্প্রতিক অর্ডারসমূহ</span>
@@ -115,14 +142,16 @@ app.get("/webapp", (req, res) => {
         `).join('')}
       </div>
     </div>
+    `}
   </div>
 </body>
 </html>
-  `;
-  res.send(html);
+    `;
+    res.send(html);
+  } catch (err) {
+    res.status(500).send(`<h3>WebApp Error: ${err.message}</h3>`);
+  }
 });
-
-app.listen(PORT, () => console.log(`✅ Keep-alive server on port ${PORT}`));
 
 // ============================================================
 // 🕐 Cron Jobs — Server Keepalive & Daily Heartbeat
@@ -146,7 +175,7 @@ cron.schedule(
     const hours = (process.uptime() / 3600).toFixed(1);
     await notifyAdmin(
       `🌅 *Daily Business Report*\n\n` +
-      `🏢 দোকান: *${state.shopName}*\n` +
+      `🎯 সক্রিয় মোড: *${state.mode}*\n` +
       `🤖 AI স্ট্যাটাস: ${state.isOn ? "✅ চালু" : "🔴 বন্ধ"}\n` +
       `⏱️ আপটাইম: ${hours} ঘণ্টা\n` +
       `📨 হ্যান্ডেলড মেসেজ: ${state.logs.length} টি`
@@ -211,7 +240,7 @@ async function connectWhatsApp() {
       state.isWhatsAppConnected = true;
       state.latestQR = null;
       console.log("✅ WhatsApp business connected!");
-      await notifyAdmin("✅ *WhatsApp সফলভাবে কানেক্ট হয়েছে!*\nদোকানের AI সেলস অ্যাসিস্ট্যান্ট এখন সম্পূর্ণ প্রস্তুত।");
+      await notifyAdmin("✅ *WhatsApp সফলভাবে কানেক্ট হয়েছে!*\nআপনার AI অ্যাসিস্ট্যান্ট এখন সম্পূর্ণ প্রস্তুত।");
     }
   });
 
@@ -249,19 +278,19 @@ async function connectWhatsApp() {
           "";
         const isImage = !!msgContent.imageMessage;
 
-        // Skip groups if not explicitly allowed
         if (isGroup && !state.replyInGroups) continue;
         if (!state.isOn) continue;
 
         const senderNumber = jid.replace("@s.whatsapp.net", "").replace("@g.us", "");
 
-        // Check if contact is allowed (rate limit & human takeover check)
         const check = canReplyToContact(senderNumber);
         if (!check.allowed) {
           if (check.reason === "muted_by_admin") {
             console.log(`⏸️ ${senderNumber} is in human takeover mode. AI skipped.`);
           } else if (check.reason === "limit_reached") {
             console.log(`🛑 Daily reply limit reached for ${senderNumber}`);
+          } else if (check.reason === "subscription_limit_exceeded") {
+            console.log(`🛑 Subscription quota exhausted.`);
           }
           continue;
         }
@@ -274,36 +303,28 @@ async function connectWhatsApp() {
         let rawReply = "";
 
         if (isImage) {
-          await notifyAdmin(`📸 *নতুন ছবি পাঠিয়েছেন কাস্টমার*\n👤 ${pushName} (\`${senderNumber}\`)\n💬 ক্যাপশন: ${textMsg || "(নেই)"}`);
+          await notifyAdmin(`📸 *নতুন ছবি পাঠিয়েছেন*\n👤 ${pushName} (\`${senderNumber}\`)\n💬 ক্যাপশন: ${textMsg || "(নেই)"}`);
           const buffer = await downloadMediaMessage(msg, "buffer", {});
           rawReply = await getGeminiImageReply(jid, buffer, "image/jpeg", textMsg, systemPrompt);
         } else if (textMsg) {
-          await notifyAdmin(`💬 *মেসেজ:* ${textMsg}\n👤 *কাস্টমার:* ${pushName} (\`${senderNumber}\`)`);
+          await notifyAdmin(`💬 *মেসেজ:* ${textMsg}\n👤 *প্রেরক:* ${pushName} (\`${senderNumber}\`)`);
           rawReply = await getGeminiReply(jid, textMsg, systemPrompt);
         } else {
           await sock.sendPresenceUpdate("paused", jid);
           continue;
         }
 
-        // Stop typing indicator
         await sock.sendPresenceUpdate("paused", jid);
 
-        // Check if reply contains confirmed order
         const { cleanReply, orderData } = extractOrderJSON(rawReply);
 
-        // Send reply to customer
         await sock.sendMessage(jid, { text: cleanReply });
 
-        // If an order is captured, process it immediately
-        if (orderData) {
+        if (orderData && state.mode === "business") {
           orderData.customerPhone = orderData.customerPhone || senderNumber;
           orderData.customerName = orderData.customerName || pushName;
           const savedOrder = createOrder(orderData);
-
-          // Alert Admin on Telegram with Action Buttons
           await sendOrderAlert(savedOrder);
-
-          // Live sync to Google Sheets
           syncOrderToGoogleSheets(savedOrder);
         }
 

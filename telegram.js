@@ -1,5 +1,5 @@
 // ============================================================
-// telegram.js - Commercial Telegram Control Center & Onboarding
+// telegram.js - Commercial Telegram Control Center & Mode-Specific Dashboard
 // ============================================================
 import { Telegraf, Markup } from "telegraf";
 import QRCode from "qrcode";
@@ -31,11 +31,10 @@ function requireAdmin(ctx, next) {
 }
 
 // ============================================================
-// UI Generators: Onboarding vs Connected Dashboard
+// Dynamic Mode-Specific Dashboard Generator
 // ============================================================
-
 export function renderDashboard(ctx) {
-  // STEP 1: If NOT connected, show simple Onboarding Screen
+  // 1. If NOT connected to WhatsApp, show simple Onboarding Screen
   if (!state.isWhatsAppConnected) {
     const buttons = Markup.inlineKeyboard([
       [Markup.button.callback("🔑 WhatsApp Connect (QR)", "btn_request_qr")],
@@ -46,30 +45,95 @@ export function renderDashboard(ctx) {
       `👋 *স্বাগতম! WhatsApp AI Agent Control Center-এ*\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `🔴 *কানেকশন স্ট্যাটাস:* WhatsApp ডিসকানেক্টেড\n\n` +
-      `বট চালু করতে এবং অপশনগুলো দেখতে প্রথমে আপনার WhatsApp অ্যাকাউন্ট কানেক্ট করুন।\n\n` +
+      `বট চালু করতে এবং সেটিংস ব্যবহার করতে প্রথমে WhatsApp অ্যাকাউন্ট কানেক্ট করুন।\n\n` +
       `👇 *নিচের বাটনে চাপ দিয়ে QR কোড স্ক্যান করুন:*`;
 
     return ctx.reply(msg, { parse_mode: "Markdown", ...buttons });
   }
 
-  // STEP 2: When Connected, unlock full interactive dashboard!
-  const modeName =
-    state.mode === "personal"
-      ? "👤 Personal Assistant"
-      : state.mode === "support"
-      ? "🎧 Customer Support"
-      : "🛍️ Product Sales (Business)";
-
   const appUrl = process.env.APP_URL || "https://whatsapp-ai-bot-nwxy.onrender.com";
 
+  // ============================================================
+  // 2. PERSONAL ASSISTANT MODE DASHBOARD
+  // ============================================================
+  if (state.mode === "personal") {
+    const buttons = Markup.inlineKeyboard([
+      [
+        Markup.button.callback("🎭 Mode: 👤 Personal", "btn_menu_modes"),
+        Markup.button.callback("👤 My Bio & Instructions", "btn_menu_personal_settings"),
+      ],
+      [
+        Markup.button.callback("💳 Subscription & Quota", "btn_menu_sub"),
+        Markup.button.webApp("📱 Open WebApp Sheet", `${appUrl}/webapp`),
+      ],
+      [
+        Markup.button.callback(state.isOn ? "🟢 Bot: ON" : "🔴 Bot: OFF", "btn_toggle_power"),
+        Markup.button.callback("🔴 Disconnect", "btn_disconnect_wa"),
+      ],
+    ]);
+
+    const msg =
+      `💼 *WhatsApp AI Assistant — Personal Desk*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🟢 *WhatsApp:* কানেক্টেড ✅\n` +
+      `🎯 *সক্রিয় মোড:* 👤 Personal Assistant\n` +
+      `👤 *মালিকের নাম:* ${state.ownerName}\n` +
+      `ℹ️ *আমার পরিচয় (Bio):* _${state.personal?.bio}_\n` +
+      `🎭 *কথার টোন:* _${state.personal?.tone}_\n` +
+      `📝 *বটকে দেওয়া নির্দেশ:* _${state.personal?.instruction}_\n` +
+      `⚡ *AI স্ট্যাটাস:* ${state.isOn ? "সচল (Active)" : "বন্ধ (Paused)"}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `নিচের বাটন চেপে আপনার নির্দেশ ও পরিচয় পরিবর্তন করুন:`;
+
+    return ctx.reply(msg, { parse_mode: "Markdown", ...buttons });
+  }
+
+  // ============================================================
+  // 3. CUSTOMER SUPPORT / FAQ MODE DASHBOARD
+  // ============================================================
+  if (state.mode === "support") {
+    const buttons = Markup.inlineKeyboard([
+      [
+        Markup.button.callback("🎭 Mode: 🎧 Support", "btn_menu_modes"),
+        Markup.button.callback("🎧 Support & Policy Settings", "btn_menu_support_settings"),
+      ],
+      [
+        Markup.button.callback("💳 Subscription & Quota", "btn_menu_sub"),
+        Markup.button.webApp("📱 Open WebApp Sheet", `${appUrl}/webapp`),
+      ],
+      [
+        Markup.button.callback(state.isOn ? "🟢 Bot: ON" : "🔴 Bot: OFF", "btn_toggle_power"),
+        Markup.button.callback("🔴 Disconnect", "btn_disconnect_wa"),
+      ],
+    ]);
+
+    const msg =
+      `💼 *WhatsApp AI Assistant — Support Desk*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🟢 *WhatsApp:* কানেক্টেড ✅\n` +
+      `🎯 *সক্রিয় মোড:* 🎧 Customer Support / FAQ\n` +
+      `🏢 *হেল্পডেস্ক:* ${state.support?.orgName}\n` +
+      `🎧 *সাপোর্ট টোন:* _${state.support?.tone}_\n` +
+      `📋 *পলিসি ও নিয়মাবলী:* _${state.support?.instruction}_\n` +
+      `⚡ *AI স্ট্যাটাস:* ${state.isOn ? "সচল (Active)" : "বন্ধ (Paused)"}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `নিচের বাটন চেপে সাপোর্ট তথ্য ও পলিসি আপডেট করুন:`;
+
+    return ctx.reply(msg, { parse_mode: "Markdown", ...buttons });
+  }
+
+  // ============================================================
+  // 4. BUSINESS / PRODUCT SALES MODE DASHBOARD (Default)
+  // ============================================================
+  const pendingOrdersCount = getAllOrders().filter((o) => o.status === "Pending").length;
   const buttons = Markup.inlineKeyboard([
     [
-      Markup.button.callback(`🎭 Mode: ${modeName.slice(0, 16)}`, "btn_menu_modes"),
-      Markup.button.callback("⚙️ Personality & Tone", "btn_menu_persona"),
+      Markup.button.callback("🎭 Mode: 🛍️ Sales", "btn_menu_modes"),
+      Markup.button.callback("🏢 Shop & Sales Settings", "btn_menu_business_settings"),
     ],
     [
       Markup.button.callback("📦 Product Manager", "btn_menu_products"),
-      Markup.button.callback(`🛒 Orders (${getAllOrders().filter((o) => o.status === "Pending").length} pending)`, "btn_view_orders"),
+      Markup.button.callback(`🛒 Orders (${pendingOrdersCount} pending)`, "btn_view_orders"),
     ],
     [
       Markup.button.callback("💳 Subscription & Quota", "btn_menu_sub"),
@@ -81,17 +145,20 @@ export function renderDashboard(ctx) {
     ],
   ]);
 
-  const dashboardText =
-    `💼 *WhatsApp AI Assistant — Command Desk*\n` +
+  const msg =
+    `💼 *WhatsApp AI Assistant — Sales & Store Desk*\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
     `🟢 *WhatsApp:* কানেক্টেড ✅\n` +
-    `🏢 *প্রতিষ্ঠান:* ${state.shopName} | *মালিক:* ${state.ownerName}\n` +
-    `🎯 *সক্রিয় মোড:* ${modeName}\n` +
-    `⚡ *AI পাওয়ার:* ${state.isOn ? "সচল (Active)" : "বন্ধ (Inactive)"}\n` +
+    `🎯 *সক্রিয় মোড:* 🛍️ Product Sales (Business)\n` +
+    `🏢 *দোকান:* ${state.business?.shopName} | *মালিক:* ${state.ownerName}\n` +
+    `📦 *প্রোডাক্ট:* ${(catalog.products || []).length} টি | 🛒 *পেন্ডিং অর্ডার:* ${pendingOrdersCount} টি\n` +
+    `🎭 *সেলস টোন:* _${state.business?.tone}_\n` +
+    `📝 *সেলস নির্দেশ:* _${state.business?.instruction}_\n` +
+    `⚡ *AI স্ট্যাটাস:* ${state.isOn ? "সচল (Active)" : "বন্ধ (Paused)"}\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `নিচের বাটন চেপে যেকোনো ফিচার পরিচালনা করুন:`;
+    `নিচের বাটন চেপে প্রোডাক্ট বা অর্ডার ম্যানেজ করুন:`;
 
-  return ctx.reply(dashboardText, { parse_mode: "Markdown", ...buttons });
+  return ctx.reply(msg, { parse_mode: "Markdown", ...buttons });
 }
 
 if (bot) {
@@ -101,7 +168,7 @@ if (bot) {
     return renderDashboard(ctx);
   });
 
-  // 1. QR Code Request Handler
+  // Login / QR Handlers
   const handleLoginRequest = async (ctx) => {
     if (state.isWhatsAppConnected) {
       return ctx.reply("✅ আপনার WhatsApp ইতিমধ্যে কানেক্টেড রয়েছে!");
@@ -137,7 +204,9 @@ if (bot) {
     return renderDashboard(ctx);
   });
 
-  // 2. Mode Selection Menu
+  // ============================================================
+  // Mode Selection Handlers
+  // ============================================================
   bot.action("btn_menu_modes", async (ctx) => {
     await ctx.answerCbQuery();
     const buttons = Markup.inlineKeyboard([
@@ -149,9 +218,9 @@ if (bot) {
 
     ctx.reply(
       `🎭 *AI Operation Mode নির্বাচন করুন:*\n\n` +
-      `১. *Product Sales (Business):* প্রোডাক্ট ক্যাটালগ দেখে দাম বলবে, ছবি দেখে প্রোডাক্ট চিনবে এবং স্বয়ংক্রিয়ভাবে অর্ডার গ্রহণ করবে।\n\n` +
-      `২. *Personal Assistant:* আপনার ব্যক্তিগত সহকারী হিসেবে চ্যাট করবে, অপ্রয়োজনীয় বড় কাজ এড়িয়ে চলবে এবং প্রয়োজনীয় মেসেজ নোট রাখবে।\n\n` +
-      `৩. *Customer Support:* আপনার দোকানের ডেলিভারি নিয়মাবলী, পলিসি ও কাস্টমারদের প্রশ্নের উত্তর দেবে।`,
+      `১. *🛍️ Product Sales (Business):* ক্যাটালগ দেখে দাম ও সাইজ বলবে, ছবি চিনে স্বয়ংক্রিয় অর্ডার নেবে এবং আপনাকে কার্ড পাঠাবে।\n\n` +
+      `২. *👤 Personal Assistant:* আপনার ব্যক্তিগত সহকারী হিসেবে চ্যাট করবে, অপ্রয়োজনীয় বড় কাজ এড়িয়ে চলবে এবং প্রয়োজনীয় মেসেজ নোট রাখবে।\n\n` +
+      `৩. *🎧 Customer Support:* আপনার প্রতিষ্ঠানের নিয়মাবলী, পলিসি ও ডেলিভারি সংক্রান্ত প্রশ্নের উত্তর দেবে।`,
       { parse_mode: "Markdown", ...buttons }
     );
   });
@@ -166,47 +235,145 @@ if (bot) {
     return renderDashboard(ctx);
   });
 
-  // 3. Personality & Tone Menu
-  bot.action("btn_menu_persona", async (ctx) => {
+  // ============================================================
+  // Personal Mode Settings Menu
+  // ============================================================
+  bot.action("btn_menu_personal_settings", async (ctx) => {
     await ctx.answerCbQuery();
     const buttons = Markup.inlineKeyboard([
-      [Markup.button.callback("✏️ Change Shop Name", "prompt_shop_name")],
-      [Markup.button.callback("🎭 Change Speaking Tone", "prompt_tone")],
-      [Markup.button.callback("📝 Add Custom Instruction", "prompt_instruction")],
+      [Markup.button.callback("✏️ Set My Name", "prompt_personal_owner_name")],
+      [Markup.button.callback("ℹ️ Set My Bio (পরিচয়)", "prompt_personal_bio")],
+      [Markup.button.callback("🎭 Set Speaking Tone", "prompt_personal_tone")],
+      [Markup.button.callback("📝 Set Instructions (কী করবে/বলবে)", "prompt_personal_instruction")],
       [Markup.button.callback("⬅️ Back to Dashboard", "btn_back_home")],
     ]);
 
     ctx.reply(
-      `⚙️ *বটের আচরণ ও ব্যক্তিত্ব সেটিংস:*\n\n` +
-      `🏢 প্রতিষ্ঠানের নাম: *${state.shopName}*\n` +
-      `👤 মালিক: *${state.ownerName}*\n` +
-      `🎭 কথা বলার টোন: _${state.speakingTone}_\n` +
-      `📝 কাস্টম নির্দেশ: _${state.customInstruction}_\n\n` +
-      `যা পরিবর্তন করতে চান নিচের বাটন চাপুন:`,
+      `👤 *Personal Assistant সেটিংস:*\n\n` +
+      `👤 মালিকের নাম: *${state.ownerName}*\n` +
+      `ℹ️ আমার পরিচয় (Bio): _${state.personal?.bio}_\n` +
+      `🎭 কথার টোন: _${state.personal?.tone}_\n` +
+      `📝 নির্দেশাবলী: _${state.personal?.instruction}_\n\n` +
+      `যা পরিবর্তন করতে চান নিচের বাটনে চাপ দিন:`,
       { parse_mode: "Markdown", ...buttons }
     );
   });
 
-  // Step-by-step Interactive Prompts
-  bot.action("prompt_shop_name", async (ctx) => {
+  bot.action("prompt_personal_owner_name", async (ctx) => {
     await ctx.answerCbQuery();
-    state.activeAdminPrompts.set(ctx.chat.id, { step: "shop_name" });
-    ctx.reply("🏢 আপনার নতুন প্রতিষ্ঠানের/দোকানের নাম লিখে পাঠান:");
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "personal_owner_name" });
+    ctx.reply("👤 আপনার নাম লিখে পাঠান (যেমন: 'মামুন'):");
   });
 
-  bot.action("prompt_tone", async (ctx) => {
+  bot.action("prompt_personal_bio", async (ctx) => {
     await ctx.answerCbQuery();
-    state.activeAdminPrompts.set(ctx.chat.id, { step: "tone" });
-    ctx.reply("🎭 AI কেমন টোনে কথা বলবে? (যেমন: 'খুব ফ্রেন্ডলি, ক্যাজুয়াল বাংলিশে এবং মাত্র ২-৩ লাইনে') লিখে পাঠান:");
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "personal_bio" });
+    ctx.reply("ℹ️ আপনার সম্পর্কে পরিচয় বা বায়ো লিখে পাঠান (যেমন: 'আমি ফ্রিল্যান্সার ও প্রোগ্রামার, বর্তমানে কাজ নিয়ে ব্যস্ত থাকি'):");
   });
 
-  bot.action("prompt_instruction", async (ctx) => {
+  bot.action("prompt_personal_tone", async (ctx) => {
     await ctx.answerCbQuery();
-    state.activeAdminPrompts.set(ctx.chat.id, { step: "instruction" });
-    ctx.reply("📝 AI-এর জন্য আপনার বিশেষ কোনো নিয়ম বা কাস্টম নির্দেশ লিখে পাঠান:");
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "personal_tone" });
+    ctx.reply("🎭 AI কেমন টোনে কথা বলবে? (যেমন: 'খুব বিনয়ী, ক্যাজুয়াল বাংলিশে এবং মাত্র ২-৩ লাইনে'):");
   });
 
-  // 4. Product Catalog Manager Menu
+  bot.action("prompt_personal_instruction", async (ctx) => {
+    await ctx.answerCbQuery();
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "personal_instruction" });
+    ctx.reply("📝 বট কী করবে এবং কীভাবে উত্তর দেবে তা বিস্তারিত লিখে পাঠান (যেমন: 'কেউ মেসেজ দিলে বলবে আমি কাজে ব্যস্ত আছি, কোনো কাজ থাকলে আর্জেন্ট মেসেজ রেখে যেতে বলবে'):");
+  });
+
+  // ============================================================
+  // Business Mode Settings Menu
+  // ============================================================
+  bot.action("btn_menu_business_settings", async (ctx) => {
+    await ctx.answerCbQuery();
+    const buttons = Markup.inlineKeyboard([
+      [Markup.button.callback("🏢 Set Shop Name", "prompt_business_shop_name")],
+      [Markup.button.callback("🚚 Set Delivery Charges", "prompt_delivery_charges")],
+      [Markup.button.callback("🎭 Set Sales Tone", "prompt_business_tone")],
+      [Markup.button.callback("📝 Set Sales Guidelines", "prompt_business_instruction")],
+      [Markup.button.callback("⬅️ Back to Dashboard", "btn_back_home")],
+    ]);
+
+    ctx.reply(
+      `🏢 *Shop & Sales সেটিংস:*\n\n` +
+      `🏢 দোকানের নাম: *${state.business?.shopName}*\n` +
+      `🚚 ডেলিভারি চার্জ: ঢাকা ৳${catalog.deliveryCharges?.insideDhaka || 80} | বাইরে ৳${catalog.deliveryCharges?.outsideDhaka || 130}\n` +
+      `🎭 সেলস টোন: _${state.business?.tone}_\n` +
+      `📝 সেলস নির্দেশাবলী: _${state.business?.instruction}_\n\n` +
+      `যা পরিবর্তন করতে চান নিচের বাটনে চাপ দিন:`,
+      { parse_mode: "Markdown", ...buttons }
+    );
+  });
+
+  bot.action("prompt_business_shop_name", async (ctx) => {
+    await ctx.answerCbQuery();
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "business_shop_name" });
+    ctx.reply("🏢 আপনার দোকানের নাম লিখে পাঠান (যেমন: 'Urban Style BD'):");
+  });
+
+  bot.action("prompt_delivery_charges", async (ctx) => {
+    await ctx.answerCbQuery();
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "delivery_charges" });
+    ctx.reply("🚚 ঢাকার ভেতরে ও বাইরে ডেলিভারি চার্জ কমা দিয়ে লিখে পাঠান (যেমন: '80, 130'):");
+  });
+
+  bot.action("prompt_business_tone", async (ctx) => {
+    await ctx.answerCbQuery();
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "business_tone" });
+    ctx.reply("🎭 সেলসের জন্য AI কেমন টোনে কথা বলবে? (যেমন: 'উদ্যমী, মিষ্টি ও বিনয়ী সেলস স্টাইল'):");
+  });
+
+  bot.action("prompt_business_instruction", async (ctx) => {
+    await ctx.answerCbQuery();
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "business_instruction" });
+    ctx.reply("📝 AI কীভাবে সেলস হ্যান্ডেল করবে এবং অর্ডার নেবে তা লিখে পাঠান (যেমন: 'প্রোডাক্টের সাইজ ও কালার জেনে অর্ডার কনফার্ম করতে উৎসাহ দেবে এবং নাম, ফোন নম্বর ও সম্পূর্ণ ঠিকানা চাইবে'):");
+  });
+
+  // ============================================================
+  // Customer Support Mode Settings Menu
+  // ============================================================
+  bot.action("btn_menu_support_settings", async (ctx) => {
+    await ctx.answerCbQuery();
+    const buttons = Markup.inlineKeyboard([
+      [Markup.button.callback("🏢 Set Org Name", "prompt_support_org_name")],
+      [Markup.button.callback("🎧 Set Support Tone", "prompt_support_tone")],
+      [Markup.button.callback("📋 Set Support Policies / FAQs", "prompt_support_instruction")],
+      [Markup.button.callback("⬅️ Back to Dashboard", "btn_back_home")],
+    ]);
+
+    ctx.reply(
+      `🎧 *Customer Support সেটিংস:*\n\n` +
+      `🏢 প্রতিষ্ঠানের নাম: *${state.support?.orgName}*\n` +
+      `🎧 সাপোর্ট টোন: _${state.support?.tone}_\n` +
+      `📋 পলিসি ও নিয়মাবলী: _${state.support?.instruction}_\n\n` +
+      `যা পরিবর্তন করতে চান নিচের বাটনে চাপ দিন:`,
+      { parse_mode: "Markdown", ...buttons }
+    );
+  });
+
+  bot.action("prompt_support_org_name", async (ctx) => {
+    await ctx.answerCbQuery();
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "support_org_name" });
+    ctx.reply("🏢 হেল্পডেস্ক বা প্রতিষ্ঠানের নাম লিখে পাঠান:");
+  });
+
+  bot.action("prompt_support_tone", async (ctx) => {
+    await ctx.answerCbQuery();
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "support_tone" });
+    ctx.reply("🎧 সাপোর্টের টোন কেমন হবে? (যেমন: 'ধৈর্যশীল ও শান্ত কাস্টমার কেয়ার স্টাইল'):");
+  });
+
+  bot.action("prompt_support_instruction", async (ctx) => {
+    await ctx.answerCbQuery();
+    state.activeAdminPrompts.set(ctx.chat.id, { step: "support_instruction" });
+    ctx.reply("📋 দোকানের ডেলিভারি টাইম, রিটার্ন পলিসি এবং সাধারণ নিয়মগুলো লিখে পাঠান:");
+  });
+
+  // ============================================================
+  // Product Catalog Manager Menu
+  // ============================================================
   bot.action("btn_menu_products", async (ctx) => {
     await ctx.answerCbQuery();
     const products = catalog.products || [];
@@ -266,7 +433,9 @@ if (bot) {
     return renderDashboard(ctx);
   });
 
-  // 5. Subscription & Quota Tracking
+  // ============================================================
+  // Subscription & Quota Menu
+  // ============================================================
   bot.action("btn_menu_sub", async (ctx) => {
     await ctx.answerCbQuery();
     const sub = state.subscription;
@@ -328,7 +497,7 @@ if (bot) {
     return renderDashboard(ctx);
   });
 
-  // View Orders
+  // View Orders (Only in Business Mode)
   bot.action("btn_view_orders", async (ctx) => {
     await ctx.answerCbQuery();
     const all = getAllOrders();
@@ -375,15 +544,97 @@ if (bot) {
     ctx.reply(`👤 *Takeover Mode Activated!*\n${phone} এর জন্য AI রিপ্লাই বন্ধ করা হয়েছে। আপনি ম্যানুয়ালি চ্যাট করুন।\nশেষ হলে \`/resume ${phone}\` লিখুন।`, { parse_mode: "Markdown" });
   });
 
-  // Text message listener for interactive inputs
+  // ============================================================
+  // Text Message Listener for Interactive Admin Inputs
+  // ============================================================
   bot.on("text", requireAdmin, async (ctx) => {
     const prompt = state.activeAdminPrompts.get(ctx.chat.id);
     if (!prompt) return;
 
     const input = ctx.message.text.trim();
 
-    if (prompt.step === "shop_name") {
-      state.shopName = input;
+    // Personal Mode Inputs
+    if (prompt.step === "personal_owner_name") {
+      state.ownerName = input;
+      saveConfig();
+      clearAllHistory();
+      state.activeAdminPrompts.delete(ctx.chat.id);
+      ctx.reply(`✅ মালিকের নাম সেট হয়েছে: *${input}*`, { parse_mode: "Markdown" });
+      return renderDashboard(ctx);
+    }
+
+    if (prompt.step === "personal_bio") {
+      state.personal.bio = input;
+      saveConfig();
+      clearAllHistory();
+      state.activeAdminPrompts.delete(ctx.chat.id);
+      ctx.reply(`✅ আমার পরিচয় (Bio) আপডেট হয়েছে:\n"${input}"`);
+      return renderDashboard(ctx);
+    }
+
+    if (prompt.step === "personal_tone") {
+      state.personal.tone = input;
+      saveConfig();
+      clearAllHistory();
+      state.activeAdminPrompts.delete(ctx.chat.id);
+      ctx.reply(`✅ Personal AI টোন সেট হয়েছে:\n"${input}"`);
+      return renderDashboard(ctx);
+    }
+
+    if (prompt.step === "personal_instruction") {
+      state.personal.instruction = input;
+      saveConfig();
+      clearAllHistory();
+      state.activeAdminPrompts.delete(ctx.chat.id);
+      ctx.reply(`✅ Personal AI-এর জন্য আপনার নতুন নির্দেশ সেভ হয়েছে!`);
+      return renderDashboard(ctx);
+    }
+
+    // Business Mode Inputs
+    if (prompt.step === "business_shop_name") {
+      state.business.shopName = input;
+      saveConfig();
+      clearAllHistory();
+      state.activeAdminPrompts.delete(ctx.chat.id);
+      ctx.reply(`✅ দোকানের নাম সেট হয়েছে: *${input}*`, { parse_mode: "Markdown" });
+      return renderDashboard(ctx);
+    }
+
+    if (prompt.step === "delivery_charges") {
+      const parts = input.split(",").map((s) => parseInt(s.trim(), 10));
+      if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        catalog.deliveryCharges = { insideDhaka: parts[0], outsideDhaka: parts[1] };
+        saveCatalog();
+        clearAllHistory();
+        state.activeAdminPrompts.delete(ctx.chat.id);
+        ctx.reply(`✅ ডেলিভারি চার্জ আপডেট হয়েছে: ঢাকা ৳${parts[0]} | ঢাকার বাইরে ৳${parts[1]}`);
+        return renderDashboard(ctx);
+      } else {
+        return ctx.reply("❌ ফরম্যাট সঠিক হয়নি। উদাহরণ: 80, 130");
+      }
+    }
+
+    if (prompt.step === "business_tone") {
+      state.business.tone = input;
+      saveConfig();
+      clearAllHistory();
+      state.activeAdminPrompts.delete(ctx.chat.id);
+      ctx.reply(`✅ সেলস টোন সেট হয়েছে:\n"${input}"`);
+      return renderDashboard(ctx);
+    }
+
+    if (prompt.step === "business_instruction") {
+      state.business.instruction = input;
+      saveConfig();
+      clearAllHistory();
+      state.activeAdminPrompts.delete(ctx.chat.id);
+      ctx.reply(`✅ সেলস গাইডলাইন ও নির্দেশ সেভ হয়েছে!`);
+      return renderDashboard(ctx);
+    }
+
+    // Support Mode Inputs
+    if (prompt.step === "support_org_name") {
+      state.support.orgName = input;
       saveConfig();
       clearAllHistory();
       state.activeAdminPrompts.delete(ctx.chat.id);
@@ -391,24 +642,25 @@ if (bot) {
       return renderDashboard(ctx);
     }
 
-    if (prompt.step === "tone") {
-      state.speakingTone = input;
+    if (prompt.step === "support_tone") {
+      state.support.tone = input;
       saveConfig();
       clearAllHistory();
       state.activeAdminPrompts.delete(ctx.chat.id);
-      ctx.reply(`✅ টোন আপডেট হয়েছে: "${input}"`);
+      ctx.reply(`✅ সাপোর্ট টোন সেট হয়েছে:\n"${input}"`);
       return renderDashboard(ctx);
     }
 
-    if (prompt.step === "instruction") {
-      state.customInstruction = input;
+    if (prompt.step === "support_instruction") {
+      state.support.instruction = input;
       saveConfig();
       clearAllHistory();
       state.activeAdminPrompts.delete(ctx.chat.id);
-      ctx.reply(`✅ কাস্টম নির্দেশ সেভ হয়েছে!`);
+      ctx.reply(`✅ সাপোর্ট পলিসি ও এফএকিউ নির্দেশ সেভ হয়েছে!`);
       return renderDashboard(ctx);
     }
 
+    // Add Product Format
     if (prompt.step === "add_product_format") {
       try {
         const lines = input.split("\n");
