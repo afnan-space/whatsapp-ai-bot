@@ -17,7 +17,7 @@ import { syncOrderToGoogleSheets } from "./sheets.js";
 // 🌐 Express Keep-alive Server
 // ============================================================
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => res.send("🤖 WhatsApp AI Business Agent is running!"));
 app.get("/health", (req, res) =>
@@ -151,6 +151,11 @@ app.get("/webapp", (req, res) => {
   } catch (err) {
     res.status(500).send(`<h3>WebApp Error: ${err.message}</h3>`);
   }
+});
+
+// Start Express Web Server
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🌐 Express web server running and listening on 0.0.0.0:${PORT}`);
 });
 
 // ============================================================

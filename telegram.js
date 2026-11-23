@@ -764,18 +764,26 @@ export async function startTelegramBot() {
 
   const launchWithRetry = async () => {
     try {
-      await bot.launch();
+      await bot.launch({ dropPendingUpdates: true });
       console.log("✅ Telegram commercial dashboard connected!");
     } catch (err) {
-      console.warn("⚠️ Telegram connect retry in 10s:", err.message);
-      setTimeout(launchWithRetry, 10000);
+      console.warn("⚠️ Telegram connect retry in 8s:", err.message);
+      setTimeout(launchWithRetry, 8000);
     }
   };
 
   launchWithRetry();
 
-  process.once("SIGINT", () => bot.stop("SIGINT"));
-  process.once("SIGTERM", () => bot.stop("SIGTERM"));
+  process.once("SIGINT", () => {
+    console.log("Stopping bot on SIGINT...");
+    try { bot.stop("SIGINT"); } catch (_) {}
+    process.exit(0);
+  });
+  process.once("SIGTERM", () => {
+    console.log("Stopping bot on SIGTERM...");
+    try { bot.stop("SIGTERM"); } catch (_) {}
+    process.exit(0);
+  });
 }
 
 export default bot;
