@@ -1,8 +1,9 @@
 // ============================================================
-// telegram.js - Commercial Telegram Control Center & Mode-Specific Dashboard
+// telegram.js - Commercial Telegram Control Center & Dynamic Mode Dashboards
 // ============================================================
 import { Telegraf, Markup } from "telegraf";
 import QRCode from "qrcode";
+import fs from "fs";
 import { state, addLog, saveConfig, getFullSystemPrompt, catalog, saveCatalog } from "./state.js";
 import { clearAllHistory } from "./gemini.js";
 import { getAllOrders, updateOrderStatus, formatOrderCard, getOrderById } from "./orders.js";
@@ -30,31 +31,35 @@ function requireAdmin(ctx, next) {
   return next();
 }
 
+export function isWhatsAppReady() {
+  if (state.isWhatsAppConnected) return true;
+  if (state.sock?.user?.id) return true;
+  try {
+    if (fs.existsSync("./auth_info/creds.json")) {
+      const c = JSON.parse(fs.readFileSync("./auth_info/creds.json", "utf-8"));
+      if (c?.me?.id) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
 // ============================================================
 // Dynamic Mode-Specific Dashboard Generator
 // ============================================================
 export function renderDashboard(ctx) {
-  // 1. If NOT connected to WhatsApp, show simple Onboarding Screen
-  if (!state.isWhatsAppConnected) {
-    const buttons = Markup.inlineKeyboard([
-      [Markup.button.callback("🔑 WhatsApp Connect (QR)", "btn_request_qr")],
-      [Markup.button.callback("🔄 Refresh Connection Status", "btn_refresh_status")],
-    ]);
+  const connected = isWhatsAppReady();
+  const waStatusBadge = connected
+    ? "🟢 WhatsApp: কানেক্টেড ✅"
+    : "🔴 WhatsApp: ডিসকানেক্টেড (কানেক্ট করতে নিচের [🔑 Connect] চাপুন)";
 
-    const msg =
-      `👋 *স্বাগতম! WhatsApp AI Agent Control Center-এ*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🔴 *কানেকশন স্ট্যাটাস:* WhatsApp ডিসকানেক্টেড\n\n` +
-      `বট চালু করতে এবং সেটিংস ব্যবহার করতে প্রথমে WhatsApp অ্যাকাউন্ট কানেক্ট করুন।\n\n` +
-      `👇 *নিচের বাটনে চাপ দিয়ে QR কোড স্ক্যান করুন:*`;
-
-    return ctx.reply(msg, { parse_mode: "Markdown", ...buttons });
-  }
+  const connectButton = connected
+    ? Markup.button.callback("🔴 Disconnect", "btn_disconnect_wa")
+    : Markup.button.callback("🔑 Connect WhatsApp (QR)", "btn_request_qr");
 
   const appUrl = process.env.APP_URL || "https://whatsapp-ai-bot-nwxy.onrender.com";
 
   // ============================================================
-  // 2. PERSONAL ASSISTANT MODE DASHBOARD
+  // 1. PERSONAL ASSISTANT MODE DASHBOARD
   // ============================================================
   if (state.mode === "personal") {
     const buttons = Markup.inlineKeyboard([
@@ -68,28 +73,28 @@ export function renderDashboard(ctx) {
       ],
       [
         Markup.button.callback(state.isOn ? "🟢 Bot: ON" : "🔴 Bot: OFF", "btn_toggle_power"),
-        Markup.button.callback("🔴 Disconnect", "btn_disconnect_wa"),
+        connectButton,
       ],
     ]);
 
     const msg =
-      `💼 *WhatsApp AI Assistant — Personal Desk*\n` +
+      `💼 *WhatsApp AI — Personal Assistant Desk*\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🟢 *WhatsApp:* কানেক্টেড ✅\n` +
+      `${waStatusBadge}\n` +
       `🎯 *সক্রিয় মোড:* 👤 Personal Assistant\n` +
-      `👤 *মালিকের নাম:* ${state.ownerName}\n` +
+      `👤 *মালিক:* ${state.ownerName}\n` +
       `ℹ️ *আমার পরিচয় (Bio):* _${state.personal?.bio}_\n` +
       `🎭 *কথার টোন:* _${state.personal?.tone}_\n` +
       `📝 *বটকে দেওয়া নির্দেশ:* _${state.personal?.instruction}_\n` +
       `⚡ *AI স্ট্যাটাস:* ${state.isOn ? "সচল (Active)" : "বন্ধ (Paused)"}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `নিচের বাটন চেপে আপনার নির্দেশ ও পরিচয় পরিবর্তন করুন:`;
+      `নিচের বাটন চেপে আপনার পরিচয়, টোন বা নির্দেশ পরিবর্তন করুন:`;
 
     return ctx.reply(msg, { parse_mode: "Markdown", ...buttons });
   }
 
   // ============================================================
-  // 3. CUSTOMER SUPPORT / FAQ MODE DASHBOARD
+  // 2. CUSTOMER SUPPORT / FAQ MODE DASHBOARD
   // ============================================================
   if (state.mode === "support") {
     const buttons = Markup.inlineKeyboard([
@@ -103,27 +108,27 @@ export function renderDashboard(ctx) {
       ],
       [
         Markup.button.callback(state.isOn ? "🟢 Bot: ON" : "🔴 Bot: OFF", "btn_toggle_power"),
-        Markup.button.callback("🔴 Disconnect", "btn_disconnect_wa"),
+        connectButton,
       ],
     ]);
 
     const msg =
-      `💼 *WhatsApp AI Assistant — Support Desk*\n` +
+      `💼 *WhatsApp AI — Support Desk*\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🟢 *WhatsApp:* কানেক্টেড ✅\n` +
+      `${waStatusBadge}\n` +
       `🎯 *সক্রিয় মোড:* 🎧 Customer Support / FAQ\n` +
       `🏢 *হেল্পডেস্ক:* ${state.support?.orgName}\n` +
       `🎧 *সাপোর্ট টোন:* _${state.support?.tone}_\n` +
       `📋 *পলিসি ও নিয়মাবলী:* _${state.support?.instruction}_\n` +
       `⚡ *AI স্ট্যাটাস:* ${state.isOn ? "সচল (Active)" : "বন্ধ (Paused)"}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `নিচের বাটন চেপে সাপোর্ট তথ্য ও পলিসি আপডেট করুন:`;
+      `নিচের বাটন চেপে প্রতিষ্ঠানের নাম বা সাপোর্ট পলিসি সেট করুন:`;
 
     return ctx.reply(msg, { parse_mode: "Markdown", ...buttons });
   }
 
   // ============================================================
-  // 4. BUSINESS / PRODUCT SALES MODE DASHBOARD (Default)
+  // 3. BUSINESS / PRODUCT SALES MODE DASHBOARD (Default)
   // ============================================================
   const pendingOrdersCount = getAllOrders().filter((o) => o.status === "Pending").length;
   const buttons = Markup.inlineKeyboard([
@@ -141,14 +146,14 @@ export function renderDashboard(ctx) {
     ],
     [
       Markup.button.callback(state.isOn ? "🟢 Bot: ON" : "🔴 Bot: OFF", "btn_toggle_power"),
-      Markup.button.callback("🔴 Disconnect", "btn_disconnect_wa"),
+      connectButton,
     ],
   ]);
 
   const msg =
-    `💼 *WhatsApp AI Assistant — Sales & Store Desk*\n` +
+    `💼 *WhatsApp AI — Sales & Store Desk*\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `🟢 *WhatsApp:* কানেক্টেড ✅\n` +
+    `${waStatusBadge}\n` +
     `🎯 *সক্রিয় মোড:* 🛍️ Product Sales (Business)\n` +
     `🏢 *দোকান:* ${state.business?.shopName} | *মালিক:* ${state.ownerName}\n` +
     `📦 *প্রোডাক্ট:* ${(catalog.products || []).length} টি | 🛒 *পেন্ডিং অর্ডার:* ${pendingOrdersCount} টি\n` +
@@ -170,12 +175,12 @@ if (bot) {
 
   // Login / QR Handlers
   const handleLoginRequest = async (ctx) => {
-    if (state.isWhatsAppConnected) {
+    if (isWhatsAppReady()) {
       return ctx.reply("✅ আপনার WhatsApp ইতিমধ্যে কানেক্টেড রয়েছে!");
     }
 
     if (!state.latestQR) {
-      return ctx.reply("⏳ নতুন QR কোড তৈরি হচ্ছে... দয়া করে ৫-১০ সেকেন্ড পর আবার 'WhatsApp Connect (QR)' বাটনে চাপ দিন।");
+      return ctx.reply("⏳ নতুন QR কোড তৈরি হচ্ছে... দয়া করে ৫-১০ সেকেন্ড পর আবার 'Connect WhatsApp (QR)' বাটনে চাপ দিন।");
     }
 
     try {
