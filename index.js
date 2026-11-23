@@ -1,5 +1,5 @@
 // ============================================================
-// index.js - Main Entry Point (Baileys + Gemini + Telegram)
+// index.js - Main Entry Point (Baileys + Gemini + Telegram + Orders)
 // ============================================================
 import "dotenv/config";
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage } from "@whiskeysockets/baileys";
@@ -7,9 +7,11 @@ import pino from "pino";
 import QRCode from "qrcode";
 import express from "express";
 import cron from "node-cron";
-import { state, addLog, getFullSystemPrompt } from "./state.js";
+import { state, addLog, getFullSystemPrompt, canReplyToContact } from "./state.js";
 import { getGeminiReply, getGeminiImageReply } from "./gemini.js";
-import { startTelegramBot, notifyAdmin, sendPhotoToAdmin } from "./telegram.js";
+import { startTelegramBot, notifyAdmin, sendPhotoToAdmin, sendOrderAlert } from "./telegram.js";
+import { createOrder } from "./orders.js";
+import { syncOrderToGoogleSheets } from "./sheets.js";
 
 // ============================================================
 // 🌐 Express Keep-alive Server
@@ -17,22 +19,22 @@ import { startTelegramBot, notifyAdmin, sendPhotoToAdmin } from "./telegram.js";
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-app.get("/",       (req, res) => res.send("🤖 WhatsApp AI Bot is running!"));
-app.get("/health", (req, res) => res.json({
-  status: "ok",
-  botOn: state.isOn,
-  groupReply: state.replyInGroups,
-  uptime: Math.floor(process.uptime()) + "s",
-  timestamp: new Date().toISOString(),
-}));
+app.get("/", (req, res) => res.send("🤖 WhatsApp AI Business Agent is running!"));
+app.get("/health", (req, res) =>
+  res.json({
+    status: "ok",
+    shop: state.shopName,
+    botOn: state.isOn,
+    uptime: Math.floor(process.uptime()) + "s",
+    timestamp: new Date().toISOString(),
+  })
+);
 
 app.listen(PORT, () => console.log(`✅ Keep-alive server on port ${PORT}`));
 
 // ============================================================
-// 🕐 Cron Jobs — Server জাগিয়ে রাখো
+// 🕐 Cron Jobs — Server Keepalive & Daily Heartbeat
 // ============================================================
-
-// Self-ping: প্রতি 4 মিনিটে নিজেকে ping
 cron.schedule("*/4 * * * *", async () => {
   try {
     const url = process.env.APP_URL || `http://127.0.0.1:${PORT}`;
@@ -46,22 +48,39 @@ cron.schedule("*/4 * * * *", async () => {
   }
 });
 
-// Daily Report: প্রতিদিন সকাল ৮টায় Telegram এ
-cron.schedule("0 8 * * *", async () => {
-  const hours = (process.uptime() / 3600).toFixed(1);
-  await notifyAdmin(
-    `🌅 *Daily Status Report*\n\n` +
-    `🤖 AI Reply: ${state.isOn ? "✅ চালু" : "🔴 বন্ধ"}\n` +
-    `👥 Group Reply: ${state.replyInGroups ? "✅ চালু" : "🔴 বন্ধ"}\n` +
-    `⏱️ Uptime: ${hours} ঘণ্টা\n` +
-    `📨 Logs: ${state.logs.length} টি`
-  );
-}, { timezone: "Asia/Dhaka" });
+cron.schedule(
+  "0 8 * * *",
+  async () => {
+    const hours = (process.uptime() / 3600).toFixed(1);
+    await notifyAdmin(
+      `🌅 *Daily Business Report*\n\n` +
+      `🏢 দোকান: *${state.shopName}*\n` +
+      `🤖 AI স্ট্যাটাস: ${state.isOn ? "✅ চালু" : "🔴 বন্ধ"}\n` +
+      `⏱️ আপটাইম: ${hours} ঘণ্টা\n` +
+      `📨 হ্যান্ডেলড মেসেজ: ${state.logs.length} টি`
+    );
+  },
+  { timezone: "Asia/Dhaka" }
+);
 
 // ============================================================
 // 📱 WhatsApp Connection (Baileys)
 // ============================================================
 const processedMessages = new Set();
+
+function extractOrderJSON(replyText) {
+  const match = replyText.match(/<<<ORDER_CONFIRMED>>>([\s\S]*?)<<<END_ORDER>>>/);
+  if (!match) return { cleanReply: replyText, orderData: null };
+
+  const cleanReply = replyText.replace(/<<<ORDER_CONFIRMED>>>[\s\S]*?<<<END_ORDER>>>/, "").trim();
+  try {
+    const orderData = JSON.parse(match[1].trim());
+    return { cleanReply, orderData };
+  } catch (e) {
+    console.error("Order JSON parse error:", e.message);
+    return { cleanReply, orderData: null };
+  }
+}
 
 async function connectWhatsApp() {
   const { state: authState, saveCreds } = await useMultiFileAuthState("./auth_info");
@@ -69,47 +88,44 @@ async function connectWhatsApp() {
   const sock = makeWASocket({
     auth: authState,
     logger: pino({ level: "silent" }),
-    browser: ["WhatsApp AI Bot", "Chrome", "1.0"],
+    browser: ["WhatsApp AI Business Bot", "Chrome", "1.0"],
   });
 
   state.sock = sock;
 
-  // ---- QR Code → Telegram এ পাঠাও ----
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log("📱 QR Code ready — Telegram এ পাঠাচ্ছি...");
+      console.log("📱 QR Code ready — sending to Telegram...");
       try {
         const qrBuffer = await QRCode.toBuffer(qr, { width: 400 });
-        await sendPhotoToAdmin(qrBuffer, "📱 WhatsApp QR Code! এটা scan করো (১ মিনিটের মধ্যে)");
-        await notifyAdmin("1️⃣ WhatsApp খোলো\n2️⃣ Settings → Linked Devices\n3️⃣ Link a Device\n4️⃣ এই QR code scan করো");
+        await sendPhotoToAdmin(qrBuffer, "📱 WhatsApp QR Code! ১ মিনিটের মধ্যে স্ক্যান করুন");
+        await notifyAdmin("1️⃣ WhatsApp ওপেন করুন\n2️⃣ Settings → Linked Devices\n3️⃣ এই QR স্ক্যান করুন");
       } catch (err) {
-        await notifyAdmin(`📱 *QR Code Scan করো:*\nhttps://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
+        await notifyAdmin(`📱 *QR Code:* https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
       }
     }
 
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = code !== DisconnectReason.loggedOut;
-
-      console.log(`🔴 Connection closed. Code: ${code}. Reconnect: ${shouldReconnect}`);
+      console.log(`🔴 WhatsApp Connection closed. Code: ${code}. Reconnect: ${shouldReconnect}`);
 
       if (shouldReconnect) {
-        await notifyAdmin(`🔄 *WhatsApp disconnect! Reconnect হচ্ছে...*\nCode: ${code}`);
+        await notifyAdmin(`🔄 *WhatsApp reconnecting...* (Code: ${code})`);
         setTimeout(connectWhatsApp, 5000);
       } else {
-        await notifyAdmin("🔴 *WhatsApp Logout হয়ে গেছে! Bot restart দরকার।*");
+        await notifyAdmin("🔴 *WhatsApp Logout হয়ে গেছে! আবার QR স্ক্যান করতে হবে।*");
       }
     }
 
     if (connection === "open") {
-      console.log("✅ WhatsApp connected!");
-      await notifyAdmin("✅ *WhatsApp সফলভাবে connect হয়েছে!*\n\nBot এখন active। Telegram থেকে control করো।");
+      console.log("✅ WhatsApp business connected!");
+      await notifyAdmin("✅ *WhatsApp সফলভাবে কানেক্ট হয়েছে!*\nদোকানের AI সেলস অ্যাসিস্ট্যান্ট এখন একটিভ।");
     }
   });
 
-  // Session save করো
   sock.ev.on("creds.update", saveCreds);
 
   // ============================================================
@@ -120,96 +136,61 @@ async function connectWhatsApp() {
 
     for (const msg of messages) {
       try {
-        // নিজের পাঠানো message ignore
         if (msg.key.fromMe) continue;
-
-        // Status update ignore
         if (msg.key.remoteJid === "status@broadcast") continue;
 
         const msgId = msg.key.id;
         if (!msgId || processedMessages.has(msgId)) continue;
         processedMessages.add(msgId);
-        // keep memory clean
         if (processedMessages.size > 1000) {
           const first = processedMessages.values().next().value;
           processedMessages.delete(first);
         }
 
-        const isGroup    = msg.key.remoteJid.endsWith("@g.us");
-        const jid        = msg.key.remoteJid;
-        const pushName   = msg.pushName || "Unknown";
+        const isGroup = msg.key.remoteJid.endsWith("@g.us");
+        const jid = msg.key.remoteJid;
+        const pushName = msg.pushName || "সম্মানিত কাস্টমার";
         const msgContent = msg.message;
-
         if (!msgContent) continue;
 
-        // ---- Message type detect ----
-        const textMsg   = msgContent.conversation
-                       || msgContent.extendedTextMessage?.text
-                       || msgContent.imageMessage?.caption
-                       || "";
-        const isImage   = !!msgContent.imageMessage;
+        const textMsg =
+          msgContent.conversation ||
+          msgContent.extendedTextMessage?.text ||
+          msgContent.imageMessage?.caption ||
+          "";
+        const isImage = !!msgContent.imageMessage;
 
-        // ============================================================
-        // GROUP MESSAGE
-        // ============================================================
-        if (isGroup) {
-          if (!state.replyInGroups) continue;
-          if (!state.isOn) continue;
-
-          // Group whitelist check
-          if (state.groupWhitelist.size > 0 && !state.groupWhitelist.has(jid)) continue;
-
-          // Show typing indicator
-          await sock.presenceSubscribe(jid);
-          await sock.sendPresenceUpdate("composing", jid);
-
-          const systemPrompt = getFullSystemPrompt();
-          let reply;
-          if (isImage) {
-            await notifyAdmin(`📨 *Group Image*\n👤 ${pushName}\n👥 Group: ${jid}\n📎 Caption: ${textMsg || "(নেই)"}`);
-            const buffer = await downloadMediaMessage(msg, "buffer", {});
-            reply = await getGeminiImageReply(jid, buffer, "image/jpeg", textMsg, systemPrompt);
-          } else if (textMsg) {
-            await notifyAdmin(`📨 *Group Message*\n👤 ${pushName}\n👥 ${jid}\n💬 ${textMsg}`);
-            reply = await getGeminiReply(jid, textMsg, systemPrompt);
-          } else {
-            await sock.sendPresenceUpdate("paused", jid);
-            continue;
-          }
-
-          // Stop typing indicator
-          await sock.sendPresenceUpdate("paused", jid);
-
-          // Group এ quoted reply দাও
-          await sock.sendMessage(jid, { text: reply }, { quoted: msg });
-          await notifyAdmin(`🤖 *Group Reply পাঠানো:*\n${reply}`);
-
-          addLog({ type: "group", from: `${pushName} (${jid})`, message: textMsg || "[image]", reply });
-          continue;
-        }
-
-        // ============================================================
-        // PERSONAL MESSAGE
-        // ============================================================
+        // Skip groups if not explicitly allowed
+        if (isGroup && !state.replyInGroups) continue;
         if (!state.isOn) continue;
 
-        // Whitelist check
-        const senderNumber = jid.replace("@s.whatsapp.net", "");
-        if (state.whitelist.size > 0 && !state.whitelist.has(senderNumber) && !state.whitelist.has(jid)) continue;
+        const senderNumber = jid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+
+        // Check if contact is allowed (rate limit & human takeover check)
+        const check = canReplyToContact(senderNumber);
+        if (!check.allowed) {
+          if (check.reason === "muted_by_admin") {
+            console.log(`⏸️ ${senderNumber} is in human takeover mode. AI skipped.`);
+          } else if (check.reason === "limit_reached") {
+            console.log(`🛑 Daily reply limit reached for ${senderNumber}`);
+          }
+          continue;
+        }
 
         // Show typing indicator
         await sock.presenceSubscribe(jid);
         await sock.sendPresenceUpdate("composing", jid);
 
         const systemPrompt = getFullSystemPrompt();
-        let reply;
+        let rawReply = "";
+
         if (isImage) {
-          await notifyAdmin(`📨 *Personal Image*\n👤 ${pushName} (${senderNumber})\n📎 Caption: ${textMsg || "(নেই)"}`);
+          await notifyAdmin(`📸 *নতুন ছবি পাঠিয়েছেন কাস্টমার*\n👤 ${pushName} (\`${senderNumber}\`)\n💬 ক্যাপশন: ${textMsg || "(নেই)"}`);
           const buffer = await downloadMediaMessage(msg, "buffer", {});
-          reply = await getGeminiImageReply(jid, buffer, "image/jpeg", textMsg, systemPrompt);
+          rawReply = await getGeminiImageReply(jid, buffer, "image/jpeg", textMsg, systemPrompt);
         } else if (textMsg) {
-          await notifyAdmin(`📨 *Personal Message*\n👤 ${pushName} (${senderNumber})\n💬 ${textMsg}`);
-          reply = await getGeminiReply(jid, textMsg, systemPrompt);
+          await notifyAdmin(`💬 *মেসেজ:* ${textMsg}\n👤 *কাস্টমার:* ${pushName} (\`${senderNumber}\`)`);
+          rawReply = await getGeminiReply(jid, textMsg, systemPrompt);
         } else {
           await sock.sendPresenceUpdate("paused", jid);
           continue;
@@ -218,15 +199,34 @@ async function connectWhatsApp() {
         // Stop typing indicator
         await sock.sendPresenceUpdate("paused", jid);
 
-        // Reply পাঠাও
-        await sock.sendMessage(jid, { text: reply });
-        await notifyAdmin(`🤖 *Reply পাঠানো:*\n${reply}`);
+        // Check if reply contains confirmed order
+        const { cleanReply, orderData } = extractOrderJSON(rawReply);
 
-        addLog({ type: "personal", from: `${pushName} (${senderNumber})`, message: textMsg || "[image]", reply });
+        // Send reply to customer
+        await sock.sendMessage(jid, { text: cleanReply });
 
+        // If an order is captured, process it immediately
+        if (orderData) {
+          orderData.customerPhone = orderData.customerPhone || senderNumber;
+          orderData.customerName = orderData.customerName || pushName;
+          const savedOrder = createOrder(orderData);
+
+          // Alert Admin on Telegram with Action Buttons
+          await sendOrderAlert(savedOrder);
+
+          // Live sync to Google Sheets
+          syncOrderToGoogleSheets(savedOrder);
+        }
+
+        addLog({
+          type: isGroup ? "group" : "personal",
+          from: `${pushName} (${senderNumber})`,
+          message: textMsg || "[image]",
+          reply: cleanReply,
+          orderCaptured: !!orderData,
+        });
       } catch (err) {
-        console.error("❌ Message error:", err.message);
-        await notifyAdmin(`❌ *Message error:*\n${err.message}`);
+        console.error("❌ Message handler error:", err.message);
         try {
           await sock.sendPresenceUpdate("paused", msg.key.remoteJid);
         } catch (_) {}
@@ -241,14 +241,14 @@ async function connectWhatsApp() {
 // 🚀 Start
 // ============================================================
 async function main() {
-  console.log("🚀 Starting WhatsApp AI Bot (Baileys)...");
+  console.log("🚀 Starting Commercial WhatsApp AI Business Bot...");
   startTelegramBot();
   await connectWhatsApp();
-  console.log("✅ All systems ready!");
+  console.log("✅ Business Bot is Live & Ready!");
 }
 
 main().catch(async (err) => {
-  console.error("💥 Fatal:", err);
-  await notifyAdmin(`💥 *Fatal Error!*\n${err.message}`);
+  console.error("💥 Fatal error on boot:", err);
+  await notifyAdmin(`💥 *Fatal Error on server:*\n${err.message}`);
   process.exit(1);
 });

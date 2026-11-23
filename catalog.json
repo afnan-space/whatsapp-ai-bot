@@ -1,0 +1,37 @@
+{
+  "currency": "BDT (৳)",
+  "deliveryCharges": {
+    "insideDhaka": 80,
+    "outsideDhaka": 130
+  },
+  "paymentMethods": ["Cash on Delivery (ক্যাশ অন ডেলিভারি)", "bKash / Nagad (বিকাশ বা নগদ)"],
+  "products": [
+    {
+      "id": "PROD-01",
+      "name": "Premium Cotton T-Shirt",
+      "category": "Clothing",
+      "price": 450,
+      "sizes": ["M", "L", "XL"],
+      "colors": ["Black", "White", "Navy Blue"],
+      "description": "100% কম্বড কটন, প্রিমিয়াম ফেব্রিক, কালার গ্যারান্টি।"
+    },
+    {
+      "id": "PROD-02",
+      "name": "Winter Heavy Hoodie",
+      "category": "Clothing",
+      "price": 950,
+      "sizes": ["L", "XL", "XXL"],
+      "colors": ["Black", "Maroon", "Charcoal"],
+      "description": "৩৫০+ জিএসএম ফ্লিস ফেব্রিক, দারুণ আরামদায়ক ও গরম।"
+    },
+    {
+      "id": "PROD-03",
+      "name": "Genuine Leather Wallet",
+      "category": "Accessories",
+      "price": 750,
+      "sizes": ["Standard"],
+      "colors": ["Brown", "Black"],
+      "description": "অরিজিনাল লেদার ওয়ালেট, একাধিক কার্ড স্লট ও কারেন্সি চেম্বার।"
+    }
+  ]
+}
